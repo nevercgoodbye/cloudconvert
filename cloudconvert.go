@@ -155,6 +155,7 @@ func (p Process) UploadFile(file, outFormat string) error {
 	}
 	defer f.Close()
 	go func() {
+		defer w.Close()
 		defer bw.Flush()
 		defer mw.Close()
 		log.Printf("Uploading %s...", f.Name())
@@ -215,6 +216,9 @@ func (p Process) Status() (StatusResponse, error) {
 	defer resp.Body.Close()
 	var s StatusResponse
 	err = json.NewDecoder(resp.Body).Decode(&s)
+	if err == nil && strings.HasPrefix(s.Output.URL, "//") {
+		s.Output.URL = p.URL[:strings.IndexByte(p.URL, ':')+1] + s.Output.URL
+	}
 	return s, err
 }
 
