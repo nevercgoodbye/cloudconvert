@@ -18,6 +18,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -42,8 +43,7 @@ func main() {
 	toFile := flag.Arg(1)
 	if toFile == "" {
 		if toFormat == "" {
-			fmt.Fprintf(os.Stderr, "-tofmt or a destination filename (second arg) is needed!\n")
-			os.Exit(2)
+			log.Fatalf("-tofmt or a destination filename (second arg) is needed!")
 		}
 		ext := filepath.Ext(fromFile)
 		if ext == "" {
@@ -57,13 +57,11 @@ func main() {
 		apiKey = os.Getenv(ccAPIkeyEnvName)
 	}
 	if apiKey == "" {
-		fmt.Fprintf(os.Stderr, "API key is needed!\n")
-		os.Exit(3)
+		log.Fatal("API key is needed!")
 	}
 
 	if err := convert(apiKey, fromFile, toFile, *flagFromFormat, toFormat, *flagWaitDur); err != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
-		os.Exit(4)
+		log.Fatal("ERROR: %v", err)
 	}
 }
 
@@ -72,11 +70,14 @@ func convert(apiKey, fromFile, toFile, fromFormat, toFormat string, wait time.Du
 	if err != nil {
 		return fmt.Errorf("NewConversion: %v", err)
 	}
+	log.Printf("process URL: %s", c.Process.URL)
 	if err = c.Start(); err != nil {
 		return fmt.Errorf("Start: %v", err)
 	}
+	log.Println("Uploaded.")
 	if err = c.Wait(wait); err != nil {
 		return err
 	}
+	log.Printf("Done.")
 	return c.Save()
 }

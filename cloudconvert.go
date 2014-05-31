@@ -20,11 +20,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -111,10 +113,19 @@ func NewProcess(apiKey, inputFormat, outputFormat string) (Process, error) {
 
 	var p Process
 	err = json.NewDecoder(resp.Body).Decode(&p)
-	if err == nil && p.URL != "" && p.URL[0] == '/' {
+	if err == nil && strings.HasPrefix(p.URL, "//") {
 		p.URL = "https:" + p.URL
 	}
 	return p, err
+}
+
+// ID returns the process ID.
+func (p Process) ID() string {
+	i := strings.LastIndex(p.URL, "/")
+	if i < 0 {
+		return p.URL
+	}
+	return p.URL[i+1:]
 }
 
 // UploadFile uploads a file, requesting the output format.
@@ -146,7 +157,9 @@ func (p Process) UploadFile(file, outFormat string) error {
 	go func() {
 		defer bw.Flush()
 		defer mw.Close()
-		_, _ = io.Copy(pw, f)
+		log.Printf("Uploading %s...", f.Name())
+		n, e := io.Copy(pw, f)
+		log.Printf("Uploaded %d bytes with result %v.", n, e)
 	}()
 	resp, err := http.Post(p.URL, mw.FormDataContentType(), r)
 	if err == nil && resp.Body != nil {
