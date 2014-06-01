@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/tgulacsi/cloudconvert"
@@ -27,6 +28,8 @@ import (
 )
 
 const ccAPIkeyEnvName = "CLOUDCONVERT_APIKEY"
+
+var oldConversions = make(map[string]string)
 
 func main() {
 	flagVerbose := flag.Bool("v", false, "verbose logging")
@@ -51,6 +54,26 @@ func main() {
 	if apiKey == "" {
 		log15.Crit("API key is needed!")
 		os.Exit(3)
+	}
+	if history, err := cloudconvert.List(apiKey); err != nil {
+		log15.Error("Downloading history.", "error", err)
+	} else {
+		for _, h := range history {
+			if h.Step != "finished" ||
+				h.Status.Output.URL == "" || h.Status.Output.FileName == "" ||
+				h.Status.Input.FileName == "" {
+				continue
+			}
+			log15.Debug("old", "input", h.Status.Input.FileName, "output", h.Status.Output.URL)
+			key := strings.ToLower(h.Status.Input.FileName)
+			oldConversions[key] = h.Status.Output.URL
+			key = strings.Replace(key, " ", string([]rune{os.PathSeparator}), -1)
+			oldConversions[key] = h.Status.Output.URL
+			if strings.HasPrefix(key, ".") {
+				oldConversions[key[1:]] = h.Status.Output.URL
+			}
+		}
+		log15.Debug("History", "old", oldConversions)
 	}
 	toFormat := *flagToFormat
 
@@ -100,6 +123,23 @@ func main() {
 }
 
 func convert(apiKey, fromFile, toFile, fromFormat, toFormat string) error {
+	log15.Debug("Search old conversions", "file", fromFile)
+	fromFileL := strings.ToLower(fromFile)
+	oldURL, ok := oldConversions[fromFileL]
+	if !ok {
+		var key string
+		for key, oldURL = range oldConversions {
+			log15.Debug("?", "fromFile", fromFile, "key", key)
+			if strings.HasSuffix(fromFile, key) {
+				ok = true
+				break
+			}
+		}
+	}
+	if ok {
+		log15.Info("File already converted.", "file", fromFile, "URL", oldURL)
+		return cloudconvert.Process{DownloadURL: oldURL}.Save(toFile)
+	}
 	c, err := cloudconvert.NewConversion(apiKey, fromFile, toFile, fromFormat, toFormat)
 	if err != nil {
 		return fmt.Errorf("NewConversion: %v", err)

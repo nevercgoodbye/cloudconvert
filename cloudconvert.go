@@ -43,12 +43,13 @@ func init() {
 }
 
 type History struct {
-	ID        string `json:"id"`
-	Host      string `json:"host"`
-	Step      string `json:"step"`
-	StartTime string `json:"starttime"`
-	EndTime   string `json:"endtime"`
-	URL       string `json:"url"`
+	ID        string         `json:"id"`
+	Host      string         `json:"host"`
+	Step      string         `json:"step"`
+	StartTime string         `json:"starttime"`
+	EndTime   string         `json:"endtime"`
+	URL       string         `json:"url"`
+	Status    StatusResponse `json:"-"`
 }
 
 // List returns the conversion history for the given API key.
@@ -59,7 +60,21 @@ func List(apiKey string) ([]History, error) {
 	}
 	defer resp.Body.Close()
 	var hist []History
-	err = json.NewDecoder(resp.Body).Decode(&hist)
+	if err = json.NewDecoder(resp.Body).Decode(&hist); err != nil {
+		return hist, err
+	}
+	for i, h := range hist {
+		if strings.HasPrefix(h.URL, "//") {
+			h.URL = "https:" + h.URL
+			hist[i] = h
+		}
+		h.Status, err = Process{URL: h.URL}.Status()
+		if err != nil {
+			Log.Warn("Getting process status.", "URL", h.URL, "error", err)
+			continue
+		}
+		hist[i] = h
+	}
 	return hist, err
 }
 
@@ -106,8 +121,9 @@ func IsPossible(from, to string) (bool, error) {
 }
 
 type Process struct {
-	URL   string `json:"url"`
-	Error string `json:"error"`
+	URL         string `json:"url"`
+	Error       string `json:"error"`
+	DownloadURL string `json:"-"`
 }
 
 // NewProcess inits the process in the remote server, returns the process' url.
@@ -242,14 +258,19 @@ func (p Process) Status() (StatusResponse, error) {
 
 // Download downloads the output file.
 func (p Process) Download() (io.ReadCloser, error) {
-	s, err := p.Status()
-	if err != nil {
-		return nil, err
+	dlURL := p.DownloadURL
+	if dlURL == "" {
+		s, err := p.Status()
+		if err != nil {
+			return nil, err
+		}
+		if s.Step == "error" {
+			return nil, errors.New(s.Message)
+		}
+		dlURL = s.Output.URL
 	}
-	if s.Step == "error" {
-		return nil, errors.New(s.Message)
-	}
-	resp, err := http.Get(s.Output.URL)
+	Log.Debug("Begin downloading.", "URL", dlURL)
+	resp, err := http.Get(dlURL)
 	if err != nil {
 		return nil, err
 	}
@@ -272,6 +293,23 @@ func (p Process) Delete() error {
 	if err == nil && resp.Body != nil {
 		_ = resp.Body.Close()
 	}
+	return err
+}
+
+// Save saves the Process' output to the given file.
+func (p Process) Save(toFile string) error {
+	d, err := p.Download()
+	Log.Info("Save", "error", err)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	f, err := os.Create(toFile)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = io.Copy(f, d)
 	return err
 }
 
@@ -362,16 +400,5 @@ func (c Conversion) Wait() error {
 
 // Save saves the output with the designated filename and extension.
 func (c Conversion) Save() error {
-	d, err := c.Process.Download()
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	f, err := os.Create(c.toFile)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = io.Copy(f, d)
-	return err
+	return c.Process.Save(c.toFile)
 }
