@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/tgulacsi/cloudconvert"
@@ -34,6 +35,7 @@ func main() {
 	flagFromFormat := flag.String("fromfmt", "", "from format (optional, will from input file name)")
 	flagToFormat := flag.String("tofmt", "", "to format - this or a second arg (destination filename) is needed")
 	flagWaitDur := flag.Duration("wait", time.Second, "wait duration")
+	flagMulti := flag.Bool("multi", false, "arguments are input files - concurrent uplad")
 	flag.Parse()
 
 	log15.Root().SetHandler(log15.StderrHandler)
@@ -44,21 +46,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "A filename to upload is needed.\n")
 		os.Exit(1)
 	}
-	fromFile := flag.Arg(0)
-	toFormat := *flagToFormat
-	toFile := flag.Arg(1)
-	if toFile == "" {
-		if toFormat == "" {
-			log15.Crit("-tofmt or a destination filename (second arg) is needed!")
-			os.Exit(2)
-		}
-		ext := filepath.Ext(fromFile)
-		if ext == "" {
-			toFile = fromFile + "." + toFormat
-		} else {
-			toFile = fromFile[:len(fromFile)-len(ext)] + "." + toFormat
-		}
-	}
 	apiKey := *flagAPIKey
 	if apiKey == "" {
 		apiKey = os.Getenv(ccAPIkeyEnvName)
@@ -67,11 +54,50 @@ func main() {
 		log15.Crit("API key is needed!")
 		os.Exit(3)
 	}
+	toFormat := *flagToFormat
 
-	if err := convert(apiKey, fromFile, toFile, *flagFromFormat, toFormat, *flagWaitDur); err != nil {
-		log15.Crit("ERROR", "error", err)
-		os.Exit(4)
+	if !*flagMulti {
+		fromFile := flag.Arg(0)
+		toFile := flag.Arg(1)
+		if toFile == "" {
+			if toFormat == "" {
+				log15.Crit("-tofmt or a destination filename (second arg) is needed!")
+				os.Exit(2)
+			}
+			toFile = changeExt(fromFile, toFormat)
+		}
+
+		if err := convert(apiKey, fromFile, toFile, *flagFromFormat, toFormat, *flagWaitDur); err != nil {
+			log15.Crit("ERROR", "error", err)
+			os.Exit(4)
+		}
+		return
 	}
+
+	if toFormat == "" {
+		log15.Crit("-tofmt is needed with -multi!")
+		os.Exit(2)
+	}
+	conc := make(chan struct{}, 5)
+	for i := 0; i < cap(conc); i++ {
+		conc <- struct{}{}
+	}
+	var wg sync.WaitGroup
+	for _, fromFile := range flag.Args() {
+		wg.Add(1)
+		go func(fromFile string) {
+			defer wg.Done()
+			token := <-conc
+			defer func() { conc <- token }()
+			toFile := changeExt(fromFile, toFormat)
+			if err := convert(apiKey, fromFile, toFile, *flagFromFormat, toFormat, *flagWaitDur); err != nil {
+				log15.Error("ERROR", "file", fromFile, "error", err)
+				return
+			}
+		}(fromFile)
+	}
+	wg.Wait()
+	return
 }
 
 func convert(apiKey, fromFile, toFile, fromFormat, toFormat string, wait time.Duration) error {
@@ -89,4 +115,12 @@ func convert(apiKey, fromFile, toFile, fromFormat, toFormat string, wait time.Du
 	}
 	log15.Info("Done.")
 	return c.Save()
+}
+
+func changeExt(fileName, newExt string) string {
+	ext := filepath.Ext(fileName)
+	if ext == "" {
+		return fileName + "." + newExt
+	}
+	return fileName[:len(fileName)-len(ext)] + "." + newExt
 }
