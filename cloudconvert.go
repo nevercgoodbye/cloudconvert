@@ -173,7 +173,7 @@ func (p Process) UploadFile(file, outFormat string) (StatusResponse, error) {
 	if _, err = pw.Write([]byte(outFormat)); err != nil {
 		return sr, err
 	}
-	if pw, err = mw.CreateFormFile("file", file); err != nil {
+	if pw, err = mw.CreateFormFile("file", filepath.Base(file)); err != nil {
 		return sr, err
 	}
 	f, err := os.Open(file)

@@ -65,13 +65,10 @@ func main() {
 				continue
 			}
 			log15.Debug("old", "input", h.Status.Input.FileName, "output", h.Status.Output.URL)
-			key := strings.ToLower(h.Status.Input.FileName)
+			key := strings.ToLower(filepath.Base(h.Status.Input.FileName))
 			oldConversions[key] = h.Status.Output.URL
 			key = strings.Replace(key, " ", string([]rune{os.PathSeparator}), -1)
-			oldConversions[key] = h.Status.Output.URL
-			if strings.HasPrefix(key, ".") {
-				oldConversions[key[1:]] = h.Status.Output.URL
-			}
+			oldConversions[filepath.Base(key)] = h.Status.Output.URL
 		}
 		log15.Debug("History", "old", oldConversions)
 	}
