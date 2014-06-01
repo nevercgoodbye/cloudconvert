@@ -155,25 +155,39 @@ func (p Process) ID() string {
 }
 
 // UploadFile uploads a file, requesting the output format.
-func (p Process) UploadFile(file, outFormat string) (StatusResponse, error) {
+type Options struct {
+	Email          bool
+	Output         string
+	Callback       string
+	ConversionOpts map[string]string
+}
+
+// UploadFile uploads the file with outFormat, and opts options are optional.
+func (p Process) UploadFile(file, outFormat string, opts *Options) (StatusResponse, error) {
 	r, w := io.Pipe()
 	bw := bufio.NewWriter(w)
 	mw := multipart.NewWriter(bw)
-	pw, err := mw.CreateFormField("input")
 	var sr StatusResponse
+	var o Options
+	if opts != nil {
+		o = *opts
+	}
+	omap := make(map[string]string, 5+len(opts.ConversionOpts))
+	omap["input"] = "upload"
+	omap["outputformat"] = outFormat
+	omap["output"] = o.Output
+	omap["callback"] = o.Callback
+	if o.Email {
+		omap["email"] = "1"
+	}
+	for k, v := range o.ConversionOpts {
+		omap["options["+k+"]"] = v
+	}
+	if err := mwSetMap(mw, omap); err != nil {
+		return sr, err
+	}
+	pw, err := mw.CreateFormFile("file", filepath.Base(file))
 	if err != nil {
-		return sr, err
-	}
-	if _, err = pw.Write([]byte("upload")); err != nil {
-		return sr, err
-	}
-	if pw, err = mw.CreateFormField("outputformat"); err != nil {
-		return sr, err
-	}
-	if _, err = pw.Write([]byte(outFormat)); err != nil {
-		return sr, err
-	}
-	if pw, err = mw.CreateFormFile("file", filepath.Base(file)); err != nil {
 		return sr, err
 	}
 	f, err := os.Open(file)
@@ -201,6 +215,29 @@ func (p Process) UploadFile(file, outFormat string) (StatusResponse, error) {
 		}
 	}
 	return sr, err
+}
+
+func mwSet(mw *multipart.Writer, key, value string) error {
+	pw, err := mw.CreateFormField(key)
+	if err != nil {
+		return err
+	}
+	if _, err = pw.Write([]byte(value)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func mwSetMap(mw *multipart.Writer, omap map[string]string) error {
+	for k, v := range omap {
+		if v == "" {
+			continue
+		}
+		if err := mwSet(mw, k, v); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type StatusResponse struct {
@@ -347,8 +384,9 @@ func NewConversion(apiKey, fromFile, toFile, fromFormat, toFormat string) (Conve
 }
 
 // Start uploads the previously given file, hence starting the conversion process.
-func (c Conversion) Start() error {
-	_, err := c.Process.UploadFile(c.fromFile, c.toFormat)
+// opts can be nil for default download file.
+func (c Conversion) Start(opts *Options) error {
+	_, err := c.Process.UploadFile(c.fromFile, c.toFormat, opts)
 	return err
 }
 

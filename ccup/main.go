@@ -37,6 +37,7 @@ func main() {
 	flagFromFormat := flag.String("fromfmt", "", "from format (optional, will from input file name)")
 	flagToFormat := flag.String("tofmt", "", "to format - this or a second arg (destination filename) is needed")
 	flagMulti := flag.Bool("multi", false, "arguments are input files - concurrent uplad")
+	flagOutput := flag.String("output", "", "output to dropbox, googledrive or s3 (default: file)")
 	flag.Parse()
 
 	log15.Root().SetHandler(log15.StderrHandler)
@@ -73,6 +74,7 @@ func main() {
 		log15.Debug("History", "old", oldConversions)
 	}
 	toFormat := *flagToFormat
+	opts := &cloudconvert.Options{Output: *flagOutput}
 
 	if !*flagMulti {
 		fromFile := flag.Arg(0)
@@ -85,7 +87,7 @@ func main() {
 			toFile = changeExt(fromFile, toFormat)
 		}
 
-		if err := convert(apiKey, fromFile, toFile, *flagFromFormat, toFormat); err != nil {
+		if err := convert(apiKey, fromFile, toFile, *flagFromFormat, toFormat, opts); err != nil {
 			log15.Crit("ERROR", "error", err)
 			os.Exit(4)
 		}
@@ -107,7 +109,7 @@ func main() {
 			defer wg.Done()
 			token := <-conc
 			toFile := changeExt(fromFile, toFormat)
-			if err := convert(apiKey, fromFile, toFile, *flagFromFormat, toFormat); err != nil {
+			if err := convert(apiKey, fromFile, toFile, *flagFromFormat, toFormat, opts); err != nil {
 				log15.Error("ERROR", "file", fromFile, "error", err)
 			} else {
 				log15.Info("converted", "file", fromFile)
@@ -119,7 +121,7 @@ func main() {
 	return
 }
 
-func convert(apiKey, fromFile, toFile, fromFormat, toFormat string) error {
+func convert(apiKey, fromFile, toFile, fromFormat, toFormat string, opts *cloudconvert.Options) error {
 	log15.Debug("Search old conversions", "file", fromFile)
 	fromFileL := strings.ToLower(fromFile)
 	oldURL, ok := oldConversions[fromFileL]
@@ -142,7 +144,7 @@ func convert(apiKey, fromFile, toFile, fromFormat, toFormat string) error {
 		return fmt.Errorf("NewConversion: %v", err)
 	}
 	log15.Info("process", "URL", c.Process.URL)
-	if err = c.Start(); err != nil {
+	if err = c.Start(opts); err != nil {
 		return fmt.Errorf("Start: %v", err)
 	}
 	log15.Info("Uploaded.")
