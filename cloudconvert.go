@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -28,9 +27,19 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gopkg.in/inconshreveable/log15.v2"
 )
 
 const CloudURLBase = "https://api.cloudconvert.org"
+
+// Log is set to DiscardHandler by default.
+// Set it to something else to see logs.
+var Log = log15.New("lib", "cloudconvert")
+
+func init() {
+	Log.SetHandler(log15.DiscardHandler())
+}
 
 type History struct {
 	ID        string `json:"id"`
@@ -129,50 +138,58 @@ func (p Process) ID() string {
 }
 
 // UploadFile uploads a file, requesting the output format.
-func (p Process) UploadFile(file, outFormat string) error {
+func (p Process) UploadFile(file, outFormat string) (StatusResponse, error) {
 	r, w := io.Pipe()
 	bw := bufio.NewWriter(w)
 	mw := multipart.NewWriter(bw)
 	pw, err := mw.CreateFormField("input")
+	var sr StatusResponse
 	if err != nil {
-		return err
+		return sr, err
 	}
 	if _, err = pw.Write([]byte("upload")); err != nil {
-		return err
+		return sr, err
 	}
 	if pw, err = mw.CreateFormField("outputformat"); err != nil {
-		return err
+		return sr, err
 	}
 	if _, err = pw.Write([]byte(outFormat)); err != nil {
-		return err
+		return sr, err
 	}
 	if pw, err = mw.CreateFormFile("file", file); err != nil {
-		return err
+		return sr, err
 	}
 	f, err := os.Open(file)
 	if err != nil {
-		return err
+		return sr, err
 	}
 	defer f.Close()
 	go func() {
 		defer w.Close()
 		defer bw.Flush()
 		defer mw.Close()
-		log.Printf("Uploading %s...", f.Name())
+		Log.Debug("Uploading", "file", f.Name())
 		n, e := io.Copy(pw, f)
-		log.Printf("Uploaded %d bytes with result %v.", n, e)
+		if e == nil {
+			Log.Debug("Uploaded", "bytes", n)
+		} else {
+			Log.Error("Uploaded", "bytes", n, "error", e)
+		}
 	}()
 	resp, err := http.Post(p.URL, mw.FormDataContentType(), r)
 	if err == nil && resp.Body != nil {
-		resp.Body.Close()
+		defer resp.Body.Close()
+		if err = json.NewDecoder(resp.Body).Decode(&sr); err != nil {
+			Log.Error("UploadFile", "error", err)
+		}
 	}
-	return err
+	return sr, err
 }
 
 type StatusResponse struct {
 	ID        string          `json:"id"`
 	URL       string          `json:"url"`
-	Percent   string          `json:"percent"`
+	Percent   json.RawMessage `json:"percent"` // either string or float32
 	Message   string          `json:"message"`
 	Step      string          `json:"step"`
 	StartTime int64           `json:"starttime"`
@@ -292,7 +309,8 @@ func NewConversion(apiKey, fromFile, toFile, fromFormat, toFormat string) (Conve
 
 // Start uploads the previously given file, hence starting the conversion process.
 func (c Conversion) Start() error {
-	return c.Process.UploadFile(c.fromFile, c.toFormat)
+	_, err := c.Process.UploadFile(c.fromFile, c.toFormat)
+	return err
 }
 
 // Wait blocks until the process' status (step) changes to "finished";
@@ -300,17 +318,19 @@ func (c Conversion) Start() error {
 // The default checkInterval is 30 seconds.
 func (c Conversion) Wait(checkInterval time.Duration) error {
 	errcnt := 0
-	t := time.NewTimer(checkInterval)
+	t := time.NewTicker(checkInterval)
 	defer t.Stop()
 	for _ = range t.C {
 		s, err := c.Process.Status()
 		if err != nil {
+			Log.Error("wait checking status", "error", err)
 			errcnt++
 			if errcnt > 3 {
 				return err
 			}
 			continue
 		}
+		Log.Debug("wait", "status", s.Step)
 		switch s.Step {
 		case "error":
 			return errors.New(s.Message)
