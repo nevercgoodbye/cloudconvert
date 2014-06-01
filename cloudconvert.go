@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -315,12 +316,9 @@ func (c Conversion) Start() error {
 
 // Wait blocks until the process' status (step) changes to "finished";
 // then returns nil, or the error if it has changed to "error".
-// The default checkInterval is 30 seconds.
-func (c Conversion) Wait(checkInterval time.Duration) error {
+func (c Conversion) Wait() error {
 	errcnt := 0
-	t := time.NewTicker(checkInterval)
-	defer t.Stop()
-	for _ = range t.C {
+	for {
 		s, err := c.Process.Status()
 		if err != nil {
 			Log.Error("wait checking status", "error", err)
@@ -328,6 +326,7 @@ func (c Conversion) Wait(checkInterval time.Duration) error {
 			if errcnt > 3 {
 				return err
 			}
+			time.Sleep(10 * time.Second)
 			continue
 		}
 		Log.Debug("wait", "status", s.Step)
@@ -337,6 +336,26 @@ func (c Conversion) Wait(checkInterval time.Duration) error {
 		case "finished":
 			return nil
 		}
+		wait := time.Second
+		perc := strings.Trim(string(s.Percent), `"`)
+		if perc != "" {
+			percent, err := strconv.ParseFloat(perc, 32)
+			if err != nil || percent < 0 || percent > 100 {
+				Log.Warn("Wait parse percent", "percent", perc, "error", err)
+			} else {
+				// elapsed time = percent, remaining time = (100% - percent)
+				// => full time = 100 * elapsed_time / percent
+				elapsed := float64(time.Since(time.Unix(s.StartTime, 0)))
+				wait = time.Duration(elapsed / percent * (100.0 - percent) / 2.0)
+				Log.Debug("Wait", "percent", perc, "starttime", s.StartTime, "elapsed", elapsed, "wait", wait)
+				if wait < time.Second {
+					wait = time.Second
+				} else if wait > time.Minute {
+					wait = time.Minute
+				}
+			}
+		}
+		time.Sleep(wait)
 	}
 	return nil
 }

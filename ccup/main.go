@@ -21,7 +21,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"github.com/tgulacsi/cloudconvert"
 	"gopkg.in/inconshreveable/log15.v2"
@@ -34,7 +33,6 @@ func main() {
 	flagAPIKey := flag.String("apikey", "", "api key (this, or "+ccAPIkeyEnvName+" env needed)")
 	flagFromFormat := flag.String("fromfmt", "", "from format (optional, will from input file name)")
 	flagToFormat := flag.String("tofmt", "", "to format - this or a second arg (destination filename) is needed")
-	flagWaitDur := flag.Duration("wait", time.Second, "wait duration")
 	flagMulti := flag.Bool("multi", false, "arguments are input files - concurrent uplad")
 	flag.Parse()
 
@@ -67,7 +65,7 @@ func main() {
 			toFile = changeExt(fromFile, toFormat)
 		}
 
-		if err := convert(apiKey, fromFile, toFile, *flagFromFormat, toFormat, *flagWaitDur); err != nil {
+		if err := convert(apiKey, fromFile, toFile, *flagFromFormat, toFormat); err != nil {
 			log15.Crit("ERROR", "error", err)
 			os.Exit(4)
 		}
@@ -90,7 +88,7 @@ func main() {
 			token := <-conc
 			defer func() { conc <- token }()
 			toFile := changeExt(fromFile, toFormat)
-			if err := convert(apiKey, fromFile, toFile, *flagFromFormat, toFormat, *flagWaitDur); err != nil {
+			if err := convert(apiKey, fromFile, toFile, *flagFromFormat, toFormat); err != nil {
 				log15.Error("ERROR", "file", fromFile, "error", err)
 				return
 			}
@@ -100,7 +98,7 @@ func main() {
 	return
 }
 
-func convert(apiKey, fromFile, toFile, fromFormat, toFormat string, wait time.Duration) error {
+func convert(apiKey, fromFile, toFile, fromFormat, toFormat string) error {
 	c, err := cloudconvert.NewConversion(apiKey, fromFile, toFile, fromFormat, toFormat)
 	if err != nil {
 		return fmt.Errorf("NewConversion: %v", err)
@@ -110,7 +108,7 @@ func convert(apiKey, fromFile, toFile, fromFormat, toFormat string, wait time.Du
 		return fmt.Errorf("Start: %v", err)
 	}
 	log15.Info("Uploaded.")
-	if err = c.Wait(wait); err != nil {
+	if err = c.Wait(); err != nil {
 		return err
 	}
 	log15.Info("Done.")
