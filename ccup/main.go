@@ -152,6 +152,10 @@ func convert(apiKey, fromFile, toFile, fromFormat, toFormat string, opts *cloudc
 		return err
 	}
 	log15.Info("Done.")
+	if opts != nil && opts.Output != "" {
+		log15.Warn("Output is not file, skip saving!", "output", opts.Output)
+		return nil
+	}
 	return c.Save()
 }
 
