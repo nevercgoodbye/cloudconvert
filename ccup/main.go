@@ -86,12 +86,13 @@ func main() {
 		go func(fromFile string) {
 			defer wg.Done()
 			token := <-conc
-			defer func() { conc <- token }()
 			toFile := changeExt(fromFile, toFormat)
 			if err := convert(apiKey, fromFile, toFile, *flagFromFormat, toFormat); err != nil {
 				log15.Error("ERROR", "file", fromFile, "error", err)
-				return
+			} else {
+				log15.Info("converted", "file", fromFile)
 			}
+			conc <- token
 		}(fromFile)
 	}
 	wg.Wait()
