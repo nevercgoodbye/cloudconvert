@@ -148,14 +148,14 @@ func convert(apiKey, fromFile, toFile, fromFormat, toFormat string, opts *cloudc
 		return fmt.Errorf("Start: %v", err)
 	}
 	log15.Info("Uploaded.")
-	if err = c.Wait(); err != nil {
-		return err
-	}
-	log15.Info("Done.")
 	if opts != nil && opts.Output != "" {
 		log15.Warn("Output is not file, skip saving!", "output", opts.Output)
 		return nil
 	}
+	if err = c.Wait(); err != nil {
+		return err
+	}
+	log15.Info("Done.")
 	return c.Save()
 }
 
